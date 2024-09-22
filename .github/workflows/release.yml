@@ -36,61 +36,8 @@ jobs:
           name: linux
           path: "tera-cli_linux_amd64.deb"
 
-  update_homebrew:
-    runs-on: macos-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build MacOS binary
-        id: build-macos-binary
-        uses: taiki-e/upload-rust-binary-action@v1
-        with:
-          bin: tera
-          target: x86_64-apple-darwin
-          archive: tera-cli-$target
-          checksum: sha256
-          dry-run: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Add tera to PATH
-        run: |
-          mv "target/x86_64-apple-darwin/release/tera" /usr/local/bin
-
-      - name: Output values for templates
-        id: output-values-for-templates
-        run: |
-          echo GITHUB_REF=$GITHUB_REF
-          RELEASE_VERSION=${GITHUB_REF#refs/*/}
-          RAW_VERSION=${RELEASE_VERSION:1}
-          echo "RAW_VERSION=$RAW_VERSION" >> $GITHUB_OUTPUT
-          SHA256="$(cut -d' ' -f1 ${{ steps.build-macos-binary.outputs.sha256 }})"
-          echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
-
-      # We do that before hecking out master (in case we were not in master already)
-      - name: Prepare new Formula
-        env:
-          NAME: Tera
-          DESCRIPTION: "A command line utility written in Rust to render templates using the tera templating engine"
-          SITE: https://github.com
-          REPO: chevdor/tera-cli
-          ARCHIVE: ${{ steps.build-macos-binary.outputs.archive }}
-          SHA256: ${{ steps.output-values-for-templates.outputs.SHA256 }}
-          VERSION: ${{ steps.output-values-for-templates.outputs.RAW_VERSION }}
-        run: |
-          tera --version
-          tera --template templates/formula.rb --env-only > $HOME/tera.rb
-          cat $HOME/tera.rb
-
-      - name: Update Homebrew Formula
-        run: |
-          cp -f $HOME/tera.rb Formula/tera.rb
-          git config --global user.name 'TeraBot'
-          git config --global user.email 'chevdor@users.noreply.github.com'
-          git commit Formula/tera.rb -m "build: new homebrew formula for ${{ env.RELEASE_VERSION }}"
-
   create_draft:
-    needs: ["linux", "update_homebrew"]
+    needs: ["linux"]
     name: Create Draft
     runs-on: ubuntu-latest
     outputs:
@@ -168,6 +115,9 @@ jobs:
 
   publish-binaries:
     needs: ["create_draft"]
+    outputs:
+      sha256_macos_x86_64: ${{ steps.output-sha256.outputs.sha256_x86_64-apple-darwin }}
+      sha256_macos_aarch64: ${{ steps.output-sha256.outputs.aarch64-apple-darwin }}
     strategy:
       matrix:
         include:
@@ -190,10 +140,67 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/upload-rust-binary-action@v1
+      - name: Publish Binaries
+        uses: taiki-e/upload-rust-binary-action@v1
+        id: upload-binary
         with:
           bin: tera
           target: ${{ matrix.target }}
           archive: tera-cli-$target
-          checksum: sha512
+          # SHA256 is used for Homebrew Formula
+          # https://docs.brew.sh/Cask-Cookbook#stanza-sha256
+          checksum: SHA256,SHA512
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Output SHA256
+        id: output-sha256
+        if: ${{ matrix.os == 'macos-latest' }}
+        run: |
+          sha256="$(cut -d' ' -f1 ${{ steps.upload-binary.outputs.sha256 }})"
+          echo "sha256_${{ matrix.target }}=$sha256" >> $GITHUB_OUTPUT
+
+  update-homebrew:
+    needs: ["publish-binaries"]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: "tera-cli_linux_amd64.deb"
+
+      - naem: Install tera-cli
+        run: |
+          dpkg -i tera-cli_linux_amd64.deb
+
+      - name: Output Release Version for Formula templates
+        id: output-release-version
+        run: |
+          echo GITHUB_REF=$GITHUB_REF
+          RELEASE_VERSION=${GITHUB_REF#refs/*/}
+          RAW_VERSION=${RELEASE_VERSION:1}
+          echo "RAW_VERSION=$RAW_VERSION" >> $GITHUB_OUTPUT
+
+      # We do that before hecking out master (in case we were not in master already)
+      - name: Prepare new Formula
+        env:
+          NAME: Tera
+          DESCRIPTION: "A command line utility written in Rust to render templates using the tera templating engine"
+          SITE: https://github.com
+          REPO: chevdor/tera-cli
+          X86_64_SHA256: ${{ needs.publish-binaries.outputs.sha256_macos_x86_64 }}
+          AARCH64_SHA256: ${{ needs.publish-binaries.outputs.sha256_macos_aarch64 }}
+          VERSION: ${{ steps.output-release-version.outputs.RAW_VERSION }}
+        run: |
+          tera --version
+          tera --template templates/formula.rb --env-only > $HOME/tera.rb
+          cat $HOME/tera.rb
+
+      - name: Update Homebrew Formula
+        run: |
+          cp -f $HOME/tera.rb Formula/tera.rb
+          git config --global user.name 'TeraBot'
+          git config --global user.email 'chevdor@users.noreply.github.com'
+          git commit Formula/tera.rb -m "build: new homebrew formula for ${{ env.RELEASE_VERSION }}"
