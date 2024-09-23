@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+env:
+  DEBIAN_PACKAGE_PATH: tera-cli_linux_amd64.deb
+
 jobs:
   linux:
     env:
@@ -28,13 +31,13 @@ jobs:
       - name: Build debian package
         shell: bash
         run: |
-          cargo deb -p teracli -o "tera-cli_linux_amd64.deb"
+          cargo deb -p teracli -o "$DEBIAN_PACKAGE_PATH"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: "tera-cli_linux_amd64.deb"
+          path: ${{ env.DEBIAN_PACKAGE_PATH }}
 
   create_draft:
     needs: ["linux"]
@@ -149,7 +152,7 @@ jobs:
           archive: tera-cli-$target
           # SHA256 is used for Homebrew Formula
           # https://docs.brew.sh/Cask-Cookbook#stanza-sha256
-          checksum: SHA256,SHA512
+          checksum: sha256,sha512
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Output SHA256
         id: output-sha256
@@ -169,11 +172,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: linux
-          path: "tera-cli_linux_amd64.deb"
+          path: ${{ env.DEBIAN_PACKAGE_PATH }}
 
-      - naem: Install tera-cli
+      - name: Install tera-cli
         run: |
-          dpkg -i tera-cli_linux_amd64.deb
+          sudo dpkg -i "$DEBIAN_PACKAGE_PATH"
 
       - name: Output Release Version for Formula templates
         id: output-release-version
