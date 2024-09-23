@@ -160,6 +160,11 @@ jobs:
         run: |
           sha256="$(cut -d' ' -f1 ${{ steps.upload-binary.outputs.sha256 }})"
           echo "sha256_${{ matrix.target }}=$sha256" >> $GITHUB_OUTPUT
+      - name: Upload artifact for x86_64 linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86_64_linux
+          path: ${{ steps.upload-binary.outputs.archive }}.tar.gz
 
   update-homebrew:
     needs: ["publish-binaries"]
@@ -168,44 +173,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download debian package
+      - name: Download binary
         uses: actions/download-artifact@v4
         with:
-          name: linux
-          path: ${{ env.DEBIAN_PACKAGE_PATH }}
+          name: x86_64_linux
+          path: tera-cli.tar.gz
 
-      - name: ls
-        run: ls -l
+      - run: ls
+
       - name: Install tera-cli
         run: |
-          sudo dpkg -i "$DEBIAN_PACKAGE_PATH"
-
-      - name: Output Release Version for Formula templates
-        id: output-release-version
-        run: |
-          echo GITHUB_REF=$GITHUB_REF
-          RELEASE_VERSION=${GITHUB_REF#refs/*/}
-          RAW_VERSION=${RELEASE_VERSION:1}
-          echo "RAW_VERSION=$RAW_VERSION" >> $GITHUB_OUTPUT
-
-      # We do that before hecking out master (in case we were not in master already)
-      - name: Prepare new Formula
-        env:
-          NAME: Tera
-          DESCRIPTION: "A command line utility written in Rust to render templates using the tera templating engine"
-          SITE: https://github.com
-          REPO: chevdor/tera-cli
-          X86_64_SHA256: ${{ needs.publish-binaries.outputs.sha256_macos_x86_64 }}
-          AARCH64_SHA256: ${{ needs.publish-binaries.outputs.sha256_macos_aarch64 }}
-          VERSION: ${{ steps.output-release-version.outputs.RAW_VERSION }}
-        run: |
-          tera --version
-          tera --template templates/formula.rb --env-only > $HOME/tera.rb
-          cat $HOME/tera.rb
-
-      - name: Update Homebrew Formula
-        run: |
-          cp -f $HOME/tera.rb Formula/tera.rb
-          git config --global user.name 'TeraBot'
-          git config --global user.email 'chevdor@users.noreply.github.com'
-          git commit Formula/tera.rb -m "build: new homebrew formula for ${{ env.RELEASE_VERSION }}"
+          tar xf tera-cli.tar.gz
+          ls -l
